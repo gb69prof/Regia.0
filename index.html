@@ -10,7 +10,7 @@
 *{ box-sizing:border-box; }
 
 html, body{
-  height: 100%;
+  height:100%;
   margin:0;
   font-family:system-ui,-apple-system,sans-serif;
   background:var(--bg);
@@ -51,7 +51,7 @@ html, body{
   overflow:hidden;
 }
 
-/* Toolbar FIXED: non sparisce su iPad */
+/* Toolbar FIXED */
 #toolbar{
   position:fixed;
   left:280px;
@@ -98,7 +98,9 @@ input, textarea{
 }
 textarea{ min-height:140px; }
 
-/* Projection */
+/* =======================
+   PROJECTION (overlay vero)
+   ======================= */
 #projection{
   position:fixed;
   inset:0;
@@ -108,30 +110,32 @@ textarea{ min-height:140px; }
   padding:28px 28px 22px;
   overflow:hidden;
   touch-action:pan-y;
+  z-index:5000; /* sopra toolbar */
 }
+
 #pTitle{ margin:0 0 14px; font-size:44px; line-height:1.1; }
 #pText{ margin:0 0 16px; font-size:26px; line-height:1.35; white-space:pre-wrap; }
 
 #pAsset{
   width:100%;
   height: calc(100% - 170px);
-  display:flex;
-  align-items:center;
-  justify-content:center;
   position:relative;
+  overflow:hidden;
 }
 
-/* Zoom/pan per immagini: CENTRO + FIT assoluto */
+/* Zoom/pan immagini */
 #zoomStage{
   width:100%;
   height:100%;
-  position:relative;
+  position:absolute;
+  inset:0;
   overflow:hidden;
   border-radius:12px;
   background:#000;
   display:none;
   touch-action:none;
 }
+
 #zoomImg{
   position:absolute;
   left:50%;
@@ -142,13 +146,27 @@ textarea{ min-height:140px; }
   -webkit-user-drag:none;
 }
 
-/* asset generici */
-#pAsset video, #pAsset audio, #pAsset iframe{
-  max-width:100%;
-  max-height:100%;
+/* fallback (video/audio/pdf) */
+#pAssetFallback{
+  position:absolute;
+  inset:0;
+  display:none; /* IMPORTANTISSIMO: non deve stare affiancato allo zoomStage */
+  align-items:center;
+  justify-content:center;
 }
 
-/* Projection controls */
+#pAssetFallback video,
+#pAssetFallback iframe{
+  width:100%;
+  height:100%;
+  border:0;
+  border-radius:12px;
+}
+#pAssetFallback audio{
+  width:min(900px, 95%);
+}
+
+/* Controls */
 #pControls{
   position:absolute;
   top:12px;
@@ -191,14 +209,6 @@ textarea{ min-height:140px; }
   z-index:20;
 }
 #zoomControls .pBtn{ min-width:56px; text-align:center; }
-
-#pAssetFallback{
-  width:100%;
-  height:100%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
 
 /* Black overlay */
 #black{
@@ -301,14 +311,14 @@ const zoomImg = $("zoomImg");
 const zoomControls = $("zoomControls");
 const fallback = $("pAssetFallback");
 
-/* Swipe state */
+/* Swipe */
 let swipeStartX = null, swipeStartT = 0;
 
 /* =========================
-   ZOOM ENGINE (CENTRO + FIT)
+   ZOOM ENGINE (centro vero + fit)
    ========================= */
-let baseScale = 1;   // scala di fit (immagine intera)
-let scale = 1;       // scala corrente
+let baseScale = 1;  // vista iniziale (fit)
+let scale = 1;
 let offsetX = 0;
 let offsetY = 0;
 
@@ -321,13 +331,10 @@ function fitAndCenter(){
   const stage = zoomStage.getBoundingClientRect();
   const iw = zoomImg.naturalWidth;
   const ih = zoomImg.naturalHeight;
-
   if(!iw || !ih) return;
 
   baseScale = Math.min(stage.width / iw, stage.height / ih);
-
-  // non ingrandire troppo immagini piccole (evita pixeloni sulla LIM)
-  baseScale = Math.min(1.2, baseScale);
+  baseScale = Math.min(1.2, baseScale); // evita pixeloni su immagini piccole
 
   scale = baseScale;
   offsetX = 0;
@@ -347,7 +354,7 @@ function zoomStep(f){
   applyTransform();
 }
 
-/* Gesture state */
+/* Gesture: drag + pinch */
 let mode = null;
 let start = null;
 
@@ -362,9 +369,7 @@ zoomStage.addEventListener("touchstart", e => {
       ox: offsetX,
       oy: offsetY
     };
-  }
-
-  if(e.touches.length === 2){
+  } else if(e.touches.length === 2){
     mode = "pinch";
     const dx = e.touches[1].clientX - e.touches[0].clientX;
     const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -382,9 +387,7 @@ zoomStage.addEventListener("touchmove", e => {
     offsetX = start.ox + (e.touches[0].clientX - start.x);
     offsetY = start.oy + (e.touches[0].clientY - start.y);
     applyTransform();
-  }
-
-  if(mode === "pinch" && e.touches.length === 2){
+  } else if(mode === "pinch" && e.touches.length === 2){
     const dx = e.touches[1].clientX - e.touches[0].clientX;
     const dy = e.touches[1].clientY - e.touches[0].clientY;
     const d = Math.hypot(dx, dy);
@@ -399,7 +402,7 @@ zoomStage.addEventListener("touchend", () => {
 },{ passive:false });
 
 /* =========================
-   SCENES
+   SCENES UI
    ========================= */
 function addScene(){
   scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null, assetIsEmbedded:false });
@@ -456,13 +459,14 @@ $("title").addEventListener("input", () => {
   scenes[current].title = $("title").value;
   renderScenes();
 });
-
 $("text").addEventListener("input", () => {
   if(current < 0) return;
   scenes[current].text = $("text").value;
 });
 
-/* FILE INPUT (immagini embedded) */
+/* =========================
+   FILE INPUT (immagini embedded)
+   ========================= */
 $("file").addEventListener("change", (e) => {
   if(current < 0) return;
   const f = e.target.files[0];
@@ -483,7 +487,7 @@ $("file").addEventListener("change", (e) => {
     return;
   }
 
-  scenes[current].asset = URL.createObjectURL(f);
+  scenes[current].asset = URL.createObjectURL(f); // temporaneo
   scenes[current].assetIsEmbedded = false;
   renderEditor();
 });
@@ -499,7 +503,7 @@ function clearAsset(){
 }
 
 /* =========================
-   PROJECTION
+   PROJECTION (fix “due finestre”)
    ========================= */
 function startProjection(){
   if(current < 0) return;
@@ -511,57 +515,63 @@ function stopProjection(){
   if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
 }
 
+function showImageMode(){
+  zoomStage.style.display = "block";
+  zoomControls.style.display = "flex";
+  fallback.style.display = "none";
+  fallback.innerHTML = "";
+}
+
+function showFallbackMode(){
+  zoomStage.style.display = "none";
+  zoomControls.style.display = "none";
+  fallback.style.display = "flex";
+  fallback.innerHTML = "";
+}
+
 function showProjection(){
   const s = scenes[current];
   projection.style.display = "block";
   $("pTitle").textContent = s.title || "";
   $("pText").textContent = s.text || "";
 
-  fallback.innerHTML = "";
-  zoomStage.style.display = "none";
-  zoomControls.style.display = "none";
-
-  if (!s.asset) return;
+  if (!s.asset) {
+    showFallbackMode();
+    return;
+  }
 
   const t = s.type || "";
   const a = (typeof s.asset === "string") ? s.asset : "";
 
   if (t.startsWith("image/") || a.startsWith("data:image/")) {
-    zoomStage.style.display = "block";
-    zoomControls.style.display = "flex";
+    showImageMode();
 
-    zoomImg.onload = () => {
-      // FIT + CENTRO immediato
-      fitAndCenter();
-    };
+    zoomImg.onload = () => fitAndCenter();
     zoomImg.src = s.asset;
 
   } else if (t.startsWith("video/")) {
+    showFallbackMode();
     const v = document.createElement("video");
     v.src = s.asset;
     v.controls = true;
     v.playsInline = true;
-    v.style.maxWidth = "100%";
-    v.style.maxHeight = "100%";
-    v.style.borderRadius = "12px";
     fallback.appendChild(v);
 
   } else if (t.startsWith("audio/")) {
+    showFallbackMode();
     const aEl = document.createElement("audio");
     aEl.src = s.asset;
     aEl.controls = true;
     fallback.appendChild(aEl);
 
   } else if (t === "application/pdf") {
+    showFallbackMode();
     const iframe = document.createElement("iframe");
     iframe.src = s.asset;
-    iframe.style.width = "100%";
-    iframe.style.height = "100%";
-    iframe.style.border = "0";
-    iframe.style.borderRadius = "12px";
     fallback.appendChild(iframe);
 
   } else {
+    showFallbackMode();
     const d = document.createElement("div");
     d.textContent = "Asset non supportato in anteprima.";
     fallback.appendChild(d);
@@ -575,7 +585,6 @@ function prevScene(){
     renderScenes();
   }
 }
-
 function nextScene(){
   if(current < scenes.length - 1){
     current++;
@@ -616,12 +625,14 @@ async function toggleFullscreen(){
     if(!document.fullscreenElement){
       await projection.requestFullscreen();
       fsBtn.textContent = "Esci schermo intero";
-      setTimeout(() => { if (zoomStage.style.display === "block") fitAndCenter(); }, 120);
     } else {
       await document.exitFullscreen();
       fsBtn.textContent = "Schermo intero";
-      setTimeout(() => { if (zoomStage.style.display === "block") fitAndCenter(); }, 120);
     }
+    // rifit dopo cambio viewport, se c'è un'immagine
+    setTimeout(() => {
+      if (projection.style.display === "block" && zoomStage.style.display === "block") fitAndCenter();
+    }, 140);
   } catch(err){
     fsBtn.textContent = "Fullscreen non disponibile";
     setTimeout(()=> fsBtn.textContent = "Schermo intero", 1200);
@@ -631,10 +642,10 @@ document.addEventListener("fullscreenchange", () => {
   fsBtn.textContent = document.fullscreenElement ? "Esci schermo intero" : "Schermo intero";
 });
 
-/* Resize/orientamento: rifit */
+/* Resize/orientamento: rifit immagine */
 window.addEventListener("resize", () => {
   if (projection.style.display === "block" && zoomStage.style.display === "block") {
-    setTimeout(fitAndCenter, 120);
+    setTimeout(fitAndCenter, 140);
   }
 });
 
