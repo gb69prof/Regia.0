@@ -1,26 +1,23 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 <title>Regia – lezioni vive su LIM</title>
 
 <style>
-:root{
-  --bg:#111; --panel:#1e1e1e; --accent:#4da3ff; --text:#f2f2f2;
-}
-*{box-sizing:border-box}
+:root{ --bg:#111; --panel:#1e1e1e; --accent:#4da3ff; --text:#f2f2f2; }
+*{ box-sizing:border-box; }
 body{
-  margin:0; font-family:system-ui,-apple-system,sans-serif;
-  background:var(--bg); color:var(--text); overflow:hidden;
+  margin:0;
+  font-family:system-ui,-apple-system,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  overflow:hidden;
 }
 
 /* Layout */
-#app{
-  display:grid;
-  grid-template-columns:280px 1fr;
-  height:100vh;
-}
+#app{ display:grid; grid-template-columns:280px 1fr; height:100vh; }
 
 /* Sidebar */
 #scenes{
@@ -81,30 +78,58 @@ textarea{ min-height:140px; }
   display:none;
   padding:28px 28px 22px;
   overflow:hidden;
-  touch-action:pan-y;
+  touch-action:pan-y; /* permette scroll verticale testo, ma gestiamo zoom su area immagine */
 }
 #pTitle{ margin:0 0 14px; font-size:44px; line-height:1.1; }
 #pText{ margin:0 0 16px; font-size:26px; line-height:1.35; white-space:pre-wrap; }
+
 #pAsset{
   width:100%;
   height: calc(100% - 170px);
   display:flex;
   align-items:center;
   justify-content:center;
+  position:relative;
 }
+
+/* Wrapper zoom/pan per immagini */
+#zoomStage{
+  width:100%;
+  height:100%;
+  position:relative;
+  overflow:hidden;
+  border-radius:12px;
+  background:#000;
+  display:none; /* appare solo con immagini */
+  touch-action:none; /* fondamentale: qui gestiamo noi pinch/drag */
+}
+#zoomImg{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform: translate(-50%, -50%) scale(1);
+  transform-origin:center center;
+  will-change: transform;
+  max-width:none; /* importantissimo per non limitare lo zoom */
+  max-height:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+
+/* Asset generici */
 #pAsset img, #pAsset video, #pAsset audio, #pAsset iframe{
   max-width:100%;
   max-height:100%;
 }
 
-/* Projection controls (always visible) */
+/* Projection controls */
 #pControls{
   position:absolute;
   top:12px;
   right:12px;
   display:flex;
   gap:10px;
-  z-index:10;
+  z-index:20;
 }
 #pNav{
   position:absolute;
@@ -114,7 +139,7 @@ textarea{ min-height:140px; }
   display:flex;
   justify-content:space-between;
   gap:10px;
-  z-index:10;
+  z-index:20;
 }
 .pBtn{
   padding:12px 14px;
@@ -127,13 +152,21 @@ textarea{ min-height:140px; }
   -webkit-backdrop-filter: blur(6px);
 }
 .pBtn:active{ transform:scale(0.98); }
-.pBtn.primary{
-  background:rgba(77,163,255,0.95);
-  color:#000;
-}
+.pBtn.primary{ background:rgba(77,163,255,0.95); color:#000; }
 .pBtn.wide{ flex:1; }
 
-/* Black screen overlay */
+/* Zoom controls (solo per immagini) */
+#zoomControls{
+  position:absolute;
+  left:12px;
+  top:12px;
+  display:none;
+  gap:10px;
+  z-index:20;
+}
+#zoomControls .pBtn{ min-width:56px; text-align:center; }
+
+/* Black overlay */
 #black{
   position:fixed;
   inset:0;
@@ -179,9 +212,21 @@ textarea{ min-height:140px; }
     <button class="pBtn" onclick="stopProjection()">Esci</button>
   </div>
 
+  <div id="zoomControls">
+    <button class="pBtn" onclick="zoomStep(1.15)">+</button>
+    <button class="pBtn" onclick="zoomStep(1/1.15)">−</button>
+    <button class="pBtn" onclick="resetZoom()">Reset</button>
+  </div>
+
   <h1 id="pTitle"></h1>
   <p id="pText"></p>
-  <div id="pAsset"></div>
+
+  <div id="pAsset">
+    <div id="zoomStage">
+      <img id="zoomImg" alt="immagine">
+    </div>
+    <div id="pAssetFallback"></div>
+  </div>
 
   <div id="pNav">
     <button class="pBtn wide" onclick="prevScene()">◀ Indietro</button>
@@ -195,15 +240,26 @@ textarea{ min-height:140px; }
 let scenes = [];
 let current = -1;
 
-// Touch swipe in projection
-let swipeStartX = null;
-let swipeStartT = 0;
-
 const $ = (id) => document.getElementById(id);
 const scenesBox = $("scenes");
 const projection = $("projection");
 const black = $("black");
 const fsBtn = $("fsBtn");
+
+const zoomStage = $("zoomStage");
+const zoomImg = $("zoomImg");
+const zoomControls = $("zoomControls");
+const fallback = $("pAssetFallback");
+
+// Stato zoom
+let zScale = 1;
+let zTx = 0; // translate x (px)
+let zTy = 0; // translate y (px)
+
+// Gesture
+let gestureMode = null; // "drag" | "pinch"
+let dragStart = null;
+let pinchStart = null;
 
 function addScene(){
   scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null });
@@ -274,7 +330,6 @@ function startProjection(){
 
 function stopProjection(){
   projection.style.display = "none";
-  // non forzo uscita fullscreen: alcuni iPad non gradiscono; però ci proviamo in modo gentile
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(()=>{});
   }
@@ -285,50 +340,58 @@ function showProjection(){
   projection.style.display = "block";
   $("pTitle").textContent = s.title || "";
   $("pText").textContent = s.text || "";
-  $("pAsset").innerHTML = "";
+
+  // reset area
+  fallback.innerHTML = "";
+  zoomStage.style.display = "none";
+  zoomControls.style.display = "none";
+  resetZoom(true);
 
   if(s.asset){
     const t = s.type || "";
+
     if(t.startsWith("image")){
-      const img = new Image();
-      img.src = s.asset;
-      img.alt = s.assetName || "immagine";
-      img.style.borderRadius = "12px";
-      $("pAsset").appendChild(img);
+      zoomStage.style.display = "block";
+      zoomControls.style.display = "flex";
+      zoomImg.src = s.asset;
+
+      // centriamo e resettiamo
+      resetZoom(true);
 
     } else if(t.startsWith("video")){
       const v = document.createElement("video");
       v.src = s.asset;
       v.controls = true;
       v.playsInline = true;
+      v.style.maxWidth = "100%";
+      v.style.maxHeight = "100%";
       v.style.borderRadius = "12px";
-      $("pAsset").appendChild(v);
+      fallback.appendChild(v);
 
     } else if(t.startsWith("audio")){
       const a = document.createElement("audio");
       a.src = s.asset;
       a.controls = true;
-      $("pAsset").appendChild(a);
+      fallback.appendChild(a);
 
     } else if(t === "application/pdf"){
-      // Su iPad spesso il PDF va in viewer: qui lo mostro in iframe quando possibile
       const iframe = document.createElement("iframe");
       iframe.src = s.asset;
       iframe.style.width = "100%";
       iframe.style.height = "100%";
       iframe.style.border = "0";
       iframe.style.borderRadius = "12px";
-      $("pAsset").appendChild(iframe);
+      fallback.appendChild(iframe);
 
     } else {
       const d = document.createElement("div");
       d.textContent = "Asset non supportato in anteprima.";
-      $("pAsset").appendChild(d);
+      fallback.appendChild(d);
     }
   }
 }
 
-/* Prev/Next buttons */
+/* Prev/Next */
 function prevScene(){
   if(current > 0){
     current--;
@@ -345,32 +408,6 @@ function nextScene(){
   }
 }
 
-/* Swipe support */
-projection.addEventListener("touchstart", (e) => {
-  if(e.touches.length !== 1) return;
-  swipeStartX = e.touches[0].clientX;
-  swipeStartT = Date.now();
-}, { passive:true });
-
-projection.addEventListener("touchmove", (e) => {
-  // non blocco lo scroll verticale (se c'è testo lungo) — quindi non preventDefault
-}, { passive:true });
-
-projection.addEventListener("touchend", (e) => {
-  if(swipeStartX === null) return;
-  const endX = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientX : swipeStartX;
-  const dx = endX - swipeStartX;
-  const dt = Date.now() - swipeStartT;
-
-  // swipe deciso: soglia più bassa su iPad, ma con limite tempo per evitare tocchi lenti
-  if(Math.abs(dx) > 70 && dt < 700){
-    if(dx > 0) prevScene();
-    else nextScene();
-  }
-
-  swipeStartX = null;
-});
-
 /* Black screen */
 function toggleBlack(){
   black.style.display = (black.style.display === "block") ? "none" : "block";
@@ -379,7 +416,6 @@ black.addEventListener("click", () => black.style.display = "none");
 
 /* Fullscreen */
 async function toggleFullscreen(){
-  // su iPad Safari il fullscreen può avere limiti: ci proviamo e aggiorniamo etichetta
   try{
     if(!document.fullscreenElement){
       await projection.requestFullscreen();
@@ -389,21 +425,16 @@ async function toggleFullscreen(){
       fsBtn.textContent = "Schermo intero";
     }
   } catch(err){
-    // se fullscreen non disponibile, almeno avviso con feedback minimo
     fsBtn.textContent = "Fullscreen non disponibile";
     setTimeout(()=> fsBtn.textContent = "Schermo intero", 1200);
   }
 }
-
-// aggiorna bottone se l'utente esce dal fullscreen con gesture/sistema
 document.addEventListener("fullscreenchange", () => {
   fsBtn.textContent = document.fullscreenElement ? "Esci schermo intero" : "Schermo intero";
 });
 
 /* Project I/O */
 function exportProject(){
-  // Nota: gli URL createObjectURL non sono riutilizzabili dopo reload: nel JSON salvo solo metadata.
-  // Questo export serve per struttura/scaletta, non per “impacchettare” i file locali.
   const safe = scenes.map(s => ({
     title: s.title || "",
     text: s.text || "",
@@ -447,6 +478,115 @@ function importProject(){
   };
   i.click();
 }
+
+/* =======================
+   ZOOM + PAN (IMMAGINI)
+   ======================= */
+
+function applyTransform(){
+  // img è posizionata al centro con translate(-50%,-50%), poi applichiamo pan/zoom
+  zoomImg.style.transform = `translate(calc(-50% + ${zTx}px), calc(-50% + ${zTy}px)) scale(${zScale})`;
+}
+
+function clampPan(){
+  // clamping morbido: evita che l’immagine “sparisca” completamente
+  // Non calcoliamo i bounds esatti (costoso e variabile). Facciamo un limite proporzionale alla stage.
+  const rect = zoomStage.getBoundingClientRect();
+  const maxX = rect.width * 1.2;
+  const maxY = rect.height * 1.2;
+  if (zTx >  maxX) zTx =  maxX;
+  if (zTx < -maxX) zTx = -maxX;
+  if (zTy >  maxY) zTy =  maxY;
+  if (zTy < -maxY) zTy = -maxY;
+}
+
+function resetZoom(silent=false){
+  zScale = 1;
+  zTx = 0;
+  zTy = 0;
+  clampPan();
+  applyTransform();
+  if(!silent){
+    // niente
+  }
+}
+
+function zoomStep(factor){
+  const next = zScale * factor;
+  zScale = Math.min(8, Math.max(1, next));
+  clampPan();
+  applyTransform();
+}
+
+function dist(t1, t2){
+  const dx = t2.clientX - t1.clientX;
+  const dy = t2.clientY - t1.clientY;
+  return Math.hypot(dx, dy);
+}
+
+function mid(t1, t2){
+  return { x:(t1.clientX+t2.clientX)/2, y:(t1.clientY+t2.clientY)/2 };
+}
+
+// Gestione touch SOLO sulla zoomStage
+zoomStage.addEventListener("touchstart", (e) => {
+  // evitiamo che la pagina interpreti pinch-zoom del browser
+  e.preventDefault();
+
+  if (e.touches.length === 1){
+    gestureMode = "drag";
+    dragStart = { x:e.touches[0].clientX, y:e.touches[0].clientY, tx:zTx, ty:zTy };
+
+  } else if (e.touches.length === 2){
+    gestureMode = "pinch";
+    const d0 = dist(e.touches[0], e.touches[1]);
+    const m0 = mid(e.touches[0], e.touches[1]);
+    pinchStart = {
+      d0,
+      m0,
+      scale0: zScale,
+      tx0: zTx,
+      ty0: zTy
+    };
+  }
+}, { passive:false });
+
+zoomStage.addEventListener("touchmove", (e) => {
+  e.preventDefault();
+
+  if (gestureMode === "drag" && e.touches.length === 1 && dragStart){
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
+    zTx = dragStart.tx + (x - dragStart.x);
+    zTy = dragStart.ty + (y - dragStart.y);
+    clampPan();
+    applyTransform();
+
+  } else if (gestureMode === "pinch" && e.touches.length === 2 && pinchStart){
+    const d1 = dist(e.touches[0], e.touches[1]);
+    const m1 = mid(e.touches[0], e.touches[1]);
+
+    // zoom
+    const ratio = d1 / pinchStart.d0;
+    zScale = Math.min(8, Math.max(1, pinchStart.scale0 * ratio));
+
+    // pan: seguiamo il movimento del centro del pinch
+    zTx = pinchStart.tx0 + (m1.x - pinchStart.m0.x);
+    zTy = pinchStart.ty0 + (m1.y - pinchStart.m0.y);
+
+    clampPan();
+    applyTransform();
+  }
+}, { passive:false });
+
+zoomStage.addEventListener("touchend", (e) => {
+  e.preventDefault();
+  if (e.touches.length === 0){
+    gestureMode = null;
+    dragStart = null;
+    pinchStart = null;
+  }
+}, { passive:false });
 
 /* Init */
 addScene();
