@@ -6,116 +6,140 @@
 <title>Regia – lezioni vive su LIM</title>
 
 <style>
-:root {
-  --bg: #111;
-  --panel: #1e1e1e;
-  --accent: #4da3ff;
-  --text: #f2f2f2;
+:root{
+  --bg:#111; --panel:#1e1e1e; --accent:#4da3ff; --text:#f2f2f2;
 }
-
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  overflow: hidden;
+*{box-sizing:border-box}
+body{
+  margin:0; font-family:system-ui,-apple-system,sans-serif;
+  background:var(--bg); color:var(--text); overflow:hidden;
 }
 
 /* Layout */
-#app {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  height: 100vh;
+#app{
+  display:grid;
+  grid-template-columns:280px 1fr;
+  height:100vh;
 }
 
 /* Sidebar */
-#scenes {
-  background: var(--panel);
-  padding: 10px;
-  overflow-y: auto;
+#scenes{
+  background:var(--panel);
+  padding:10px;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
 }
-
-.scene {
-  padding: 12px;
-  margin-bottom: 8px;
-  background: #2a2a2a;
-  border-radius: 8px;
-  cursor: pointer;
+.scene{
+  padding:12px;
+  margin-bottom:8px;
+  background:#2a2a2a;
+  border-radius:10px;
+  cursor:pointer;
+  user-select:none;
 }
-
-.scene.active {
-  outline: 2px solid var(--accent);
-}
+.scene.active{ outline:2px solid var(--accent); }
 
 /* Main */
-#main {
-  display: flex;
-  flex-direction: column;
+#main{ display:flex; flex-direction:column; min-width:0; }
+#toolbar{
+  display:flex; gap:8px; padding:10px; background:#000;
+  flex-wrap:wrap;
 }
+button{
+  padding:12px 14px;
+  font-size:16px;
+  border:none;
+  border-radius:10px;
+  background:var(--accent);
+  color:#000;
+}
+button.secondary{ background:#333; color:var(--text); }
+button:active{ transform:scale(0.98); }
 
-#toolbar {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  background: #000;
+#editor{
+  flex:1;
+  padding:16px;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
 }
-
-button {
-  padding: 10px 14px;
-  font-size: 16px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #000;
+input, textarea{
+  width:100%;
+  margin-bottom:10px;
+  padding:12px;
+  font-size:18px;
+  border-radius:10px;
+  border:none;
 }
-
-button.secondary {
-  background: #333;
-  color: var(--text);
-}
-
-#editor {
-  flex: 1;
-  padding: 16px;
-  overflow-y: auto;
-}
-
-input, textarea {
-  width: 100%;
-  margin-bottom: 10px;
-  padding: 10px;
-  font-size: 18px;
-  border-radius: 6px;
-  border: none;
-}
-
-textarea {
-  min-height: 120px;
-}
+textarea{ min-height:140px; }
 
 /* Projection */
-#projection {
-  position: fixed;
-  inset: 0;
-  background: black;
-  color: white;
-  display: none;
-  padding: 40px;
+#projection{
+  position:fixed;
+  inset:0;
+  background:#000;
+  color:#fff;
+  display:none;
+  padding:28px 28px 22px;
+  overflow:hidden;
+  touch-action:pan-y;
+}
+#pTitle{ margin:0 0 14px; font-size:44px; line-height:1.1; }
+#pText{ margin:0 0 16px; font-size:26px; line-height:1.35; white-space:pre-wrap; }
+#pAsset{
+  width:100%;
+  height: calc(100% - 170px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+#pAsset img, #pAsset video, #pAsset audio, #pAsset iframe{
+  max-width:100%;
+  max-height:100%;
 }
 
-#projection h1 {
-  font-size: 48px;
+/* Projection controls (always visible) */
+#pControls{
+  position:absolute;
+  top:12px;
+  right:12px;
+  display:flex;
+  gap:10px;
+  z-index:10;
 }
-
-#projection p {
-  font-size: 28px;
+#pNav{
+  position:absolute;
+  bottom:12px;
+  left:12px;
+  right:12px;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  z-index:10;
 }
+.pBtn{
+  padding:12px 14px;
+  font-size:18px;
+  border:none;
+  border-radius:12px;
+  background:rgba(255,255,255,0.16);
+  color:#fff;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.pBtn:active{ transform:scale(0.98); }
+.pBtn.primary{
+  background:rgba(77,163,255,0.95);
+  color:#000;
+}
+.pBtn.wide{ flex:1; }
 
-#black {
-  position: fixed;
-  inset: 0;
-  background: black;
-  display: none;
+/* Black screen overlay */
+#black{
+  position:fixed;
+  inset:0;
+  background:#000;
+  display:none;
+  z-index:9999;
 }
 </style>
 </head>
@@ -136,16 +160,33 @@ textarea {
     <div id="editor">
       <input id="title" placeholder="Titolo scena">
       <textarea id="text" placeholder="Testo / punti chiave"></textarea>
-      <input type="file" id="file" accept="image/*,video/*,audio/*,application/pdf">
-      <div id="asset"></div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+        <input type="file" id="file" accept="image/*,video/*,audio/*,application/pdf" style="flex:1; min-width:260px;">
+        <button class="secondary" onclick="clearAsset()">Rimuovi asset</button>
+      </div>
+
+      <div id="asset" style="opacity:0.85;"></div>
     </div>
   </div>
 </div>
 
-<div id="projection" ontouchstart="handleTouch(event)">
+<!-- Projection -->
+<div id="projection">
+  <div id="pControls">
+    <button class="pBtn" onclick="toggleBlack()">Schermo nero</button>
+    <button class="pBtn primary" id="fsBtn" onclick="toggleFullscreen()">Schermo intero</button>
+    <button class="pBtn" onclick="stopProjection()">Esci</button>
+  </div>
+
   <h1 id="pTitle"></h1>
   <p id="pText"></p>
   <div id="pAsset"></div>
+
+  <div id="pNav">
+    <button class="pBtn wide" onclick="prevScene()">◀ Indietro</button>
+    <button class="pBtn wide" onclick="nextScene()">Avanti ▶</button>
+  </div>
 </div>
 
 <div id="black"></div>
@@ -153,131 +194,262 @@ textarea {
 <script>
 let scenes = [];
 let current = -1;
-let startX = null;
 
-/* Scene handling */
-function addScene() {
-  scenes.push({ title: "Nuova scena", text: "", asset: null, type: null });
+// Touch swipe in projection
+let swipeStartX = null;
+let swipeStartT = 0;
+
+const $ = (id) => document.getElementById(id);
+const scenesBox = $("scenes");
+const projection = $("projection");
+const black = $("black");
+const fsBtn = $("fsBtn");
+
+function addScene(){
+  scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null });
   selectScene(scenes.length - 1);
   renderScenes();
 }
 
-function selectScene(i) {
+function selectScene(i){
   current = i;
   renderScenes();
   renderEditor();
 }
 
-function renderScenes() {
-  const box = document.getElementById("scenes");
-  box.innerHTML = "";
+function renderScenes(){
+  scenesBox.innerHTML = "";
   scenes.forEach((s, i) => {
     const d = document.createElement("div");
     d.className = "scene" + (i === current ? " active" : "");
-    d.textContent = s.title;
+    d.textContent = s.title || ("Scena " + (i+1));
     d.onclick = () => selectScene(i);
-    box.appendChild(d);
+    scenesBox.appendChild(d);
   });
 }
 
-function renderEditor() {
-  if (current < 0) return;
+function renderEditor(){
+  if(current < 0) return;
   const s = scenes[current];
-  title.value = s.title;
-  text.value = s.text;
-  asset.innerHTML = s.asset ? "[Asset caricato]" : "";
+  $("title").value = s.title || "";
+  $("text").value = s.text || "";
+  $("asset").textContent = s.assetName ? ("Asset: " + s.assetName) : (s.asset ? "[Asset caricato]" : "");
 }
 
-title.oninput = () => {
-  scenes[current].title = title.value;
+$("title").addEventListener("input", () => {
+  if(current < 0) return;
+  scenes[current].title = $("title").value;
   renderScenes();
-};
-text.oninput = () => scenes[current].text = text.value;
+});
 
-file.onchange = e => {
+$("text").addEventListener("input", () => {
+  if(current < 0) return;
+  scenes[current].text = $("text").value;
+});
+
+$("file").addEventListener("change", (e) => {
+  if(current < 0) return;
   const f = e.target.files[0];
-  if (!f) return;
+  if(!f) return;
   scenes[current].asset = URL.createObjectURL(f);
-  scenes[current].type = f.type;
+  scenes[current].type = f.type || "";
+  scenes[current].assetName = f.name || "file";
   renderEditor();
-};
+});
+
+function clearAsset(){
+  if(current < 0) return;
+  scenes[current].asset = null;
+  scenes[current].type = null;
+  scenes[current].assetName = null;
+  $("file").value = "";
+  renderEditor();
+}
 
 /* Projection */
-function startProjection() {
-  if (current < 0) return;
+function startProjection(){
+  if(current < 0) return;
   showProjection();
 }
 
-function showProjection() {
+function stopProjection(){
+  projection.style.display = "none";
+  // non forzo uscita fullscreen: alcuni iPad non gradiscono; però ci proviamo in modo gentile
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(()=>{});
+  }
+}
+
+function showProjection(){
   const s = scenes[current];
   projection.style.display = "block";
-  pTitle.textContent = s.title;
-  pText.textContent = s.text;
-  pAsset.innerHTML = "";
+  $("pTitle").textContent = s.title || "";
+  $("pText").textContent = s.text || "";
+  $("pAsset").innerHTML = "";
 
-  if (s.asset) {
-    if (s.type.startsWith("image")) {
+  if(s.asset){
+    const t = s.type || "";
+    if(t.startsWith("image")){
       const img = new Image();
       img.src = s.asset;
-      img.style.maxWidth = "100%";
-      pAsset.appendChild(img);
-    } else if (s.type.startsWith("video")) {
+      img.alt = s.assetName || "immagine";
+      img.style.borderRadius = "12px";
+      $("pAsset").appendChild(img);
+
+    } else if(t.startsWith("video")){
       const v = document.createElement("video");
       v.src = s.asset;
       v.controls = true;
-      v.style.maxWidth = "100%";
-      pAsset.appendChild(v);
+      v.playsInline = true;
+      v.style.borderRadius = "12px";
+      $("pAsset").appendChild(v);
+
+    } else if(t.startsWith("audio")){
+      const a = document.createElement("audio");
+      a.src = s.asset;
+      a.controls = true;
+      $("pAsset").appendChild(a);
+
+    } else if(t === "application/pdf"){
+      // Su iPad spesso il PDF va in viewer: qui lo mostro in iframe quando possibile
+      const iframe = document.createElement("iframe");
+      iframe.src = s.asset;
+      iframe.style.width = "100%";
+      iframe.style.height = "100%";
+      iframe.style.border = "0";
+      iframe.style.borderRadius = "12px";
+      $("pAsset").appendChild(iframe);
+
+    } else {
+      const d = document.createElement("div");
+      d.textContent = "Asset non supportato in anteprima.";
+      $("pAsset").appendChild(d);
     }
   }
 }
 
-function handleTouch(e) {
-  if (e.touches.length === 1) {
-    if (startX === null) startX = e.touches[0].clientX;
-    else {
-      let dx = e.touches[0].clientX - startX;
-      if (dx > 80 && current > 0) {
-        current--;
-        showProjection();
-        startX = null;
-      }
-      if (dx < -80 && current < scenes.length - 1) {
-        current++;
-        showProjection();
-        startX = null;
-      }
-    }
+/* Prev/Next buttons */
+function prevScene(){
+  if(current > 0){
+    current--;
+    showProjection();
+    renderScenes();
   }
 }
 
-/* Black screen */
-document.addEventListener("keydown", e => {
-  if (e.key === "b") black.style.display = black.style.display ? "" : "block";
+function nextScene(){
+  if(current < scenes.length - 1){
+    current++;
+    showProjection();
+    renderScenes();
+  }
+}
+
+/* Swipe support */
+projection.addEventListener("touchstart", (e) => {
+  if(e.touches.length !== 1) return;
+  swipeStartX = e.touches[0].clientX;
+  swipeStartT = Date.now();
+}, { passive:true });
+
+projection.addEventListener("touchmove", (e) => {
+  // non blocco lo scroll verticale (se c'è testo lungo) — quindi non preventDefault
+}, { passive:true });
+
+projection.addEventListener("touchend", (e) => {
+  if(swipeStartX === null) return;
+  const endX = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientX : swipeStartX;
+  const dx = endX - swipeStartX;
+  const dt = Date.now() - swipeStartT;
+
+  // swipe deciso: soglia più bassa su iPad, ma con limite tempo per evitare tocchi lenti
+  if(Math.abs(dx) > 70 && dt < 700){
+    if(dx > 0) prevScene();
+    else nextScene();
+  }
+
+  swipeStartX = null;
 });
 
-/* Project */
-function exportProject() {
-  const blob = new Blob([JSON.stringify(scenes)], { type: "application/json" });
+/* Black screen */
+function toggleBlack(){
+  black.style.display = (black.style.display === "block") ? "none" : "block";
+}
+black.addEventListener("click", () => black.style.display = "none");
+
+/* Fullscreen */
+async function toggleFullscreen(){
+  // su iPad Safari il fullscreen può avere limiti: ci proviamo e aggiorniamo etichetta
+  try{
+    if(!document.fullscreenElement){
+      await projection.requestFullscreen();
+      fsBtn.textContent = "Esci schermo intero";
+    } else {
+      await document.exitFullscreen();
+      fsBtn.textContent = "Schermo intero";
+    }
+  } catch(err){
+    // se fullscreen non disponibile, almeno avviso con feedback minimo
+    fsBtn.textContent = "Fullscreen non disponibile";
+    setTimeout(()=> fsBtn.textContent = "Schermo intero", 1200);
+  }
+}
+
+// aggiorna bottone se l'utente esce dal fullscreen con gesture/sistema
+document.addEventListener("fullscreenchange", () => {
+  fsBtn.textContent = document.fullscreenElement ? "Esci schermo intero" : "Schermo intero";
+});
+
+/* Project I/O */
+function exportProject(){
+  // Nota: gli URL createObjectURL non sono riutilizzabili dopo reload: nel JSON salvo solo metadata.
+  // Questo export serve per struttura/scaletta, non per “impacchettare” i file locali.
+  const safe = scenes.map(s => ({
+    title: s.title || "",
+    text: s.text || "",
+    type: s.type || null,
+    assetName: s.assetName || null,
+    asset: (s.asset && typeof s.asset === "string" && s.asset.startsWith("http")) ? s.asset : null
+  }));
+
+  const blob = new Blob([JSON.stringify(safe, null, 2)], { type:"application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "regia.json";
   a.click();
 }
 
-function importProject() {
+function importProject(){
   const i = document.createElement("input");
   i.type = "file";
   i.accept = "application/json";
-  i.onchange = e => {
+  i.onchange = (e) => {
+    const f = e.target.files[0];
+    if(!f) return;
     const r = new FileReader();
     r.onload = () => {
-      scenes = JSON.parse(r.result);
-      selectScene(0);
+      try{
+        const data = JSON.parse(r.result);
+        scenes = (Array.isArray(data) ? data : []).map(s => ({
+          title: s.title || "Scena",
+          text: s.text || "",
+          asset: s.asset || null,
+          type: s.type || null,
+          assetName: s.assetName || null
+        }));
+        if(scenes.length === 0) scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null });
+        selectScene(0);
+      } catch(err){
+        alert("JSON non valido.");
+      }
     };
-    r.readAsText(e.target.files[0]);
+    r.readAsText(f);
   };
   i.click();
 }
+
+/* Init */
+addScene();
 </script>
 
 </body>
