@@ -51,6 +51,7 @@ button{
   color:#000;
 }
 button.secondary{ background:#333; color:var(--text); }
+button.danger{ background:#b43b3b; color:#fff; }
 button:active{ transform:scale(0.98); }
 
 #editor{
@@ -78,7 +79,7 @@ textarea{ min-height:140px; }
   display:none;
   padding:28px 28px 22px;
   overflow:hidden;
-  touch-action:pan-y; /* permette scroll verticale testo, ma gestiamo zoom su area immagine */
+  touch-action:pan-y; /* scroll verticale testo */
 }
 #pTitle{ margin:0 0 14px; font-size:44px; line-height:1.1; }
 #pText{ margin:0 0 16px; font-size:26px; line-height:1.35; white-space:pre-wrap; }
@@ -100,8 +101,8 @@ textarea{ min-height:140px; }
   overflow:hidden;
   border-radius:12px;
   background:#000;
-  display:none; /* appare solo con immagini */
-  touch-action:none; /* fondamentale: qui gestiamo noi pinch/drag */
+  display:none;
+  touch-action:none; /* qui gestiamo noi pinch/drag */
 }
 #zoomImg{
   position:absolute;
@@ -110,14 +111,14 @@ textarea{ min-height:140px; }
   transform: translate(-50%, -50%) scale(1);
   transform-origin:center center;
   will-change: transform;
-  max-width:none; /* importantissimo per non limitare lo zoom */
+  max-width:none;
   max-height:none;
   user-select:none;
   -webkit-user-drag:none;
 }
 
 /* Asset generici */
-#pAsset img, #pAsset video, #pAsset audio, #pAsset iframe{
+#pAsset video, #pAsset audio, #pAsset iframe{
   max-width:100%;
   max-height:100%;
 }
@@ -166,6 +167,15 @@ textarea{ min-height:140px; }
 }
 #zoomControls .pBtn{ min-width:56px; text-align:center; }
 
+/* Fallback asset container */
+#pAssetFallback{
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
 /* Black overlay */
 #black{
   position:fixed;
@@ -185,6 +195,7 @@ textarea{ min-height:140px; }
   <div id="main">
     <div id="toolbar">
       <button onclick="addScene()">+ Scena</button>
+      <button class="secondary" onclick="deleteScene()">Elimina scena</button>
       <button class="secondary" onclick="startProjection()">Proiezione</button>
       <button class="secondary" onclick="exportProject()">Esporta</button>
       <button class="secondary" onclick="importProject()">Importa</button>
@@ -200,6 +211,11 @@ textarea{ min-height:140px; }
       </div>
 
       <div id="asset" style="opacity:0.85;"></div>
+
+      <div style="opacity:0.75; font-size:14px; margin-top:10px; line-height:1.3;">
+        Nota: le <b>immagini</b> vengono salvate nel progetto e tornano dopo Import.
+        Video/Audio/PDF locali sono temporanei: per conservarli usa URL (es. GitHub/Drive con link diretto).
+      </div>
     </div>
   </div>
 </div>
@@ -237,6 +253,9 @@ textarea{ min-height:140px; }
 <div id="black"></div>
 
 <script>
+/* =========================
+   MODEL
+   ========================= */
 let scenes = [];
 let current = -1;
 
@@ -251,20 +270,40 @@ const zoomImg = $("zoomImg");
 const zoomControls = $("zoomControls");
 const fallback = $("pAssetFallback");
 
-// Stato zoom
+// Zoom state
 let zScale = 1;
-let zTx = 0; // translate x (px)
-let zTy = 0; // translate y (px)
+let zTx = 0;
+let zTy = 0;
 
-// Gesture
+// Gesture state (zoom)
 let gestureMode = null; // "drag" | "pinch"
 let dragStart = null;
 let pinchStart = null;
 
+// Swipe in projection (prev/next)
+let swipeStartX = null;
+let swipeStartT = 0;
+
+/* =========================
+   SCENES UI
+   ========================= */
 function addScene(){
-  scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null });
+  scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null, assetIsEmbedded:false });
   selectScene(scenes.length - 1);
   renderScenes();
+}
+
+function deleteScene(){
+  if (current < 0) return;
+  scenes.splice(current, 1);
+  if (scenes.length === 0) {
+    scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null, assetIsEmbedded:false });
+    current = 0;
+  } else {
+    current = Math.min(current, scenes.length - 1);
+  }
+  renderScenes();
+  renderEditor();
 }
 
 function selectScene(i){
@@ -289,7 +328,14 @@ function renderEditor(){
   const s = scenes[current];
   $("title").value = s.title || "";
   $("text").value = s.text || "";
-  $("asset").textContent = s.assetName ? ("Asset: " + s.assetName) : (s.asset ? "[Asset caricato]" : "");
+
+  if (s.asset) {
+    const kind = (s.type || "").startsWith("image/") ? "Immagine" : "Asset";
+    const note = s.assetIsEmbedded ? " (salvata nel progetto)" : " (temporaneo)";
+    $("asset").textContent = `${kind}: ${s.assetName || "file"}${note}`;
+  } else {
+    $("asset").textContent = "";
+  }
 }
 
 $("title").addEventListener("input", () => {
@@ -303,13 +349,35 @@ $("text").addEventListener("input", () => {
   scenes[current].text = $("text").value;
 });
 
+/* =========================
+   FILE INPUT (Soluzione A)
+   - immagini: DataURL (persistono)
+   - altri: blob URL (non persistono)
+   ========================= */
 $("file").addEventListener("change", (e) => {
   if(current < 0) return;
   const f = e.target.files[0];
   if(!f) return;
-  scenes[current].asset = URL.createObjectURL(f);
-  scenes[current].type = f.type || "";
+
+  const type = f.type || "";
+  scenes[current].type = type;
   scenes[current].assetName = f.name || "file";
+
+  // IMMAGINI: incorporazione nel progetto (DataURL)
+  if (type.startsWith("image/")) {
+    const r = new FileReader();
+    r.onload = () => {
+      scenes[current].asset = r.result;              // data:image/...;base64,...
+      scenes[current].assetIsEmbedded = true;        // importante
+      renderEditor();
+    };
+    r.readAsDataURL(f);
+    return;
+  }
+
+  // ALTRI FILE: temporanei
+  scenes[current].asset = URL.createObjectURL(f);    // blob:...
+  scenes[current].assetIsEmbedded = false;
   renderEditor();
 });
 
@@ -318,11 +386,14 @@ function clearAsset(){
   scenes[current].asset = null;
   scenes[current].type = null;
   scenes[current].assetName = null;
+  scenes[current].assetIsEmbedded = false;
   $("file").value = "";
   renderEditor();
 }
 
-/* Projection */
+/* =========================
+   PROJECTION
+   ========================= */
 function startProjection(){
   if(current < 0) return;
   showProjection();
@@ -341,57 +412,55 @@ function showProjection(){
   $("pTitle").textContent = s.title || "";
   $("pText").textContent = s.text || "";
 
-  // reset area
+  // reset containers
   fallback.innerHTML = "";
   zoomStage.style.display = "none";
   zoomControls.style.display = "none";
   resetZoom(true);
 
-  if(s.asset){
-    const t = s.type || "";
+  if (!s.asset) return;
 
-    if(t.startsWith("image")){
-      zoomStage.style.display = "block";
-      zoomControls.style.display = "flex";
-      zoomImg.src = s.asset;
+  const t = s.type || "";
 
-      // centriamo e resettiamo
-      resetZoom(true);
+  if (t.startsWith("image/") || (typeof s.asset === "string" && s.asset.startsWith("data:image/"))) {
+    zoomStage.style.display = "block";
+    zoomControls.style.display = "flex";
+    zoomImg.src = s.asset;
+    resetZoom(true);
 
-    } else if(t.startsWith("video")){
-      const v = document.createElement("video");
-      v.src = s.asset;
-      v.controls = true;
-      v.playsInline = true;
-      v.style.maxWidth = "100%";
-      v.style.maxHeight = "100%";
-      v.style.borderRadius = "12px";
-      fallback.appendChild(v);
+  } else if (t.startsWith("video/")) {
+    const v = document.createElement("video");
+    v.src = s.asset;
+    v.controls = true;
+    v.playsInline = true;
+    v.style.maxWidth = "100%";
+    v.style.maxHeight = "100%";
+    v.style.borderRadius = "12px";
+    fallback.appendChild(v);
 
-    } else if(t.startsWith("audio")){
-      const a = document.createElement("audio");
-      a.src = s.asset;
-      a.controls = true;
-      fallback.appendChild(a);
+  } else if (t.startsWith("audio/")) {
+    const a = document.createElement("audio");
+    a.src = s.asset;
+    a.controls = true;
+    fallback.appendChild(a);
 
-    } else if(t === "application/pdf"){
-      const iframe = document.createElement("iframe");
-      iframe.src = s.asset;
-      iframe.style.width = "100%";
-      iframe.style.height = "100%";
-      iframe.style.border = "0";
-      iframe.style.borderRadius = "12px";
-      fallback.appendChild(iframe);
+  } else if (t === "application/pdf") {
+    const iframe = document.createElement("iframe");
+    iframe.src = s.asset;
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.border = "0";
+    iframe.style.borderRadius = "12px";
+    fallback.appendChild(iframe);
 
-    } else {
-      const d = document.createElement("div");
-      d.textContent = "Asset non supportato in anteprima.";
-      fallback.appendChild(d);
-    }
+  } else {
+    const d = document.createElement("div");
+    d.textContent = "Asset non supportato in anteprima.";
+    fallback.appendChild(d);
   }
 }
 
-/* Prev/Next */
+/* Prev/Next buttons */
 function prevScene(){
   if(current > 0){
     current--;
@@ -399,7 +468,6 @@ function prevScene(){
     renderScenes();
   }
 }
-
 function nextScene(){
   if(current < scenes.length - 1){
     current++;
@@ -407,6 +475,29 @@ function nextScene(){
     renderScenes();
   }
 }
+
+/* Swipe support in projection (prev/next) */
+projection.addEventListener("touchstart", (e) => {
+  // non interferire con pinch/drag dell’immagine: se tocchi dentro zoomStage, non swipare.
+  if (e.target && (e.target.id === "zoomStage" || e.target.id === "zoomImg")) return;
+  if(e.touches.length !== 1) return;
+  swipeStartX = e.touches[0].clientX;
+  swipeStartT = Date.now();
+}, { passive:true });
+
+projection.addEventListener("touchend", (e) => {
+  if(swipeStartX === null) return;
+  const endX = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientX : swipeStartX;
+  const dx = endX - swipeStartX;
+  const dt = Date.now() - swipeStartT;
+
+  if(Math.abs(dx) > 70 && dt < 700){
+    if(dx > 0) prevScene();
+    else nextScene();
+  }
+
+  swipeStartX = null;
+}, { passive:true });
 
 /* Black screen */
 function toggleBlack(){
@@ -433,15 +524,30 @@ document.addEventListener("fullscreenchange", () => {
   fsBtn.textContent = document.fullscreenElement ? "Esci schermo intero" : "Schermo intero";
 });
 
-/* Project I/O */
+/* =========================
+   EXPORT / IMPORT (Soluzione A)
+   - salva data:image/... per immagini embedded
+   - salva http(s) per asset linkati
+   - NON salva blob: (temporanei)
+   ========================= */
 function exportProject(){
-  const safe = scenes.map(s => ({
-    title: s.title || "",
-    text: s.text || "",
-    type: s.type || null,
-    assetName: s.assetName || null,
-    asset: (s.asset && typeof s.asset === "string" && s.asset.startsWith("http")) ? s.asset : null
-  }));
+  const safe = scenes.map(s => {
+    const a = (typeof s.asset === "string") ? s.asset : null;
+
+    const assetToSave =
+      (a && (a.startsWith("data:image/") || a.startsWith("http://") || a.startsWith("https://")))
+        ? a
+        : null;
+
+    return {
+      title: s.title || "",
+      text: s.text || "",
+      type: s.type || null,
+      assetName: s.assetName || null,
+      assetIsEmbedded: !!(assetToSave && assetToSave.startsWith("data:image/")),
+      asset: assetToSave
+    };
+  });
 
   const blob = new Blob([JSON.stringify(safe, null, 2)], { type:"application/json" });
   const a = document.createElement("a");
@@ -466,9 +572,13 @@ function importProject(){
           text: s.text || "",
           asset: s.asset || null,
           type: s.type || null,
-          assetName: s.assetName || null
+          assetName: s.assetName || null,
+          assetIsEmbedded: !!s.assetIsEmbedded || (typeof s.asset === "string" && s.asset.startsWith("data:image/"))
         }));
-        if(scenes.length === 0) scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null });
+
+        if(scenes.length === 0){
+          scenes.push({ title:"Nuova scena", text:"", asset:null, type:null, assetName:null, assetIsEmbedded:false });
+        }
         selectScene(0);
       } catch(err){
         alert("JSON non valido.");
@@ -479,18 +589,13 @@ function importProject(){
   i.click();
 }
 
-/* =======================
+/* =========================
    ZOOM + PAN (IMMAGINI)
-   ======================= */
-
+   ========================= */
 function applyTransform(){
-  // img è posizionata al centro con translate(-50%,-50%), poi applichiamo pan/zoom
   zoomImg.style.transform = `translate(calc(-50% + ${zTx}px), calc(-50% + ${zTy}px)) scale(${zScale})`;
 }
-
 function clampPan(){
-  // clamping morbido: evita che l’immagine “sparisca” completamente
-  // Non calcoliamo i bounds esatti (costoso e variabile). Facciamo un limite proporzionale alla stage.
   const rect = zoomStage.getBoundingClientRect();
   const maxX = rect.width * 1.2;
   const maxY = rect.height * 1.2;
@@ -499,38 +604,30 @@ function clampPan(){
   if (zTy >  maxY) zTy =  maxY;
   if (zTy < -maxY) zTy = -maxY;
 }
-
 function resetZoom(silent=false){
   zScale = 1;
   zTx = 0;
   zTy = 0;
   clampPan();
   applyTransform();
-  if(!silent){
-    // niente
-  }
+  if(!silent){}
 }
-
 function zoomStep(factor){
   const next = zScale * factor;
   zScale = Math.min(8, Math.max(1, next));
   clampPan();
   applyTransform();
 }
-
 function dist(t1, t2){
   const dx = t2.clientX - t1.clientX;
   const dy = t2.clientY - t1.clientY;
   return Math.hypot(dx, dy);
 }
-
 function mid(t1, t2){
   return { x:(t1.clientX+t2.clientX)/2, y:(t1.clientY+t2.clientY)/2 };
 }
 
-// Gestione touch SOLO sulla zoomStage
 zoomStage.addEventListener("touchstart", (e) => {
-  // evitiamo che la pagina interpreti pinch-zoom del browser
   e.preventDefault();
 
   if (e.touches.length === 1){
@@ -541,13 +638,7 @@ zoomStage.addEventListener("touchstart", (e) => {
     gestureMode = "pinch";
     const d0 = dist(e.touches[0], e.touches[1]);
     const m0 = mid(e.touches[0], e.touches[1]);
-    pinchStart = {
-      d0,
-      m0,
-      scale0: zScale,
-      tx0: zTx,
-      ty0: zTy
-    };
+    pinchStart = { d0, m0, scale0:zScale, tx0:zTx, ty0:zTy };
   }
 }, { passive:false });
 
@@ -566,11 +657,9 @@ zoomStage.addEventListener("touchmove", (e) => {
     const d1 = dist(e.touches[0], e.touches[1]);
     const m1 = mid(e.touches[0], e.touches[1]);
 
-    // zoom
     const ratio = d1 / pinchStart.d0;
     zScale = Math.min(8, Math.max(1, pinchStart.scale0 * ratio));
 
-    // pan: seguiamo il movimento del centro del pinch
     zTx = pinchStart.tx0 + (m1.x - pinchStart.m0.x);
     zTy = pinchStart.ty0 + (m1.y - pinchStart.m0.y);
 
